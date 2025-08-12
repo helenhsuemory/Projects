@@ -89,7 +89,11 @@ export default function VideoWatchParty() {
             fs: 0,
             modestbranding: 1,
             rel: 0,
-            showinfo: 0
+            showinfo: 0,
+            iv_load_policy: 3,
+            cc_load_policy: 0,
+            playsinline: 1,
+            enablejsapi: 1
           },
           events: {
             onReady: (event) => {
@@ -105,11 +109,18 @@ export default function VideoWatchParty() {
               }
             },
             onStateChange: (event) => {
+              console.log('Player state changed:', event.data);
               if (event.data === window.YT.PlayerState.PLAYING) {
                 setIsPlaying(true);
               } else if (event.data === window.YT.PlayerState.PAUSED || 
-                        event.data === window.YT.PlayerState.ENDED) {
+                        event.data === window.YT.PlayerState.ENDED ||
+                        event.data === window.YT.PlayerState.BUFFERING) {
                 setIsPlaying(false);
+              }
+              
+              // Handle video ended state
+              if (event.data === window.YT.PlayerState.ENDED) {
+                console.log('Video ended naturally');
               }
             },
             onError: (event) => {
@@ -147,13 +158,18 @@ export default function VideoWatchParty() {
         throw new Error('Failed to create video player. ' + playerError.message);
       }
 
-      // Start playing
+      // Wait a moment for player to be fully ready, then start playing
+      await new Promise(resolve => setTimeout(resolve, 1000));
       player.playVideo();
+      console.log('Started video playback for run', runNumber);
 
       // Monitor progress with timeout
       return new Promise((resolve, reject) => {
         const startTime = Date.now();
-        const maxWaitTime = (totalDuration + 30) * 1000; // Max wait time
+        let videoDuration = 0;
+        let hasStartedPlaying = false;
+        let stuckCounter = 0;
+        let lastPosition = 0;
 
         const checkProgress = () => {
           try {
@@ -162,58 +178,104 @@ export default function VideoWatchParty() {
               return;
             }
 
-            // Check if we've been waiting too long
-            if (Date.now() - startTime > maxWaitTime) {
+            const currentSeconds = player.getCurrentTime();
+            const duration = player.getDuration();
+            const playerState = player.getPlayerState();
+            
+            // Update duration once we get it
+            if (duration && duration > 0 && videoDuration === 0) {
+              videoDuration = duration;
+              setTotalDuration(duration);
+            }
+
+            // Check if player is in error state
+            if (playerState === window.YT.PlayerState.UNSTARTED && Date.now() - startTime > 10000) {
               clearInterval(intervalRef.current);
-              player.pauseVideo();
-              reject(new Error('Playback timeout - took longer than expected'));
+              reject(new Error('Video failed to start playing - may be restricted or unavailable'));
               return;
             }
 
-            const currentSeconds = player.getCurrentTime();
-            const duration = player.getDuration();
+            // Check if video has started playing
+            if (currentSeconds > 0 && !hasStartedPlaying) {
+              hasStartedPlaying = true;
+              console.log(`Video started playing at ${currentSeconds}s`);
+            }
+
+            // Dynamic timeout based on actual duration or reasonable fallback
+            const dynamicTimeout = videoDuration > 0 ? (videoDuration + 60) * 1000 : 600000; // 10 minutes max if no duration
             
-            if (!duration || duration === 0) {
-              // If we can't get duration, assume it's a short video and complete after reasonable time
-              if (Date.now() - startTime > 30000) { // 30 seconds max for unknown duration
+            if (Date.now() - startTime > dynamicTimeout) {
+              clearInterval(intervalRef.current);
+              player.pauseVideo();
+              reject(new Error(`Playback timeout - exceeded ${dynamicTimeout/1000} seconds`));
+              return;
+            }
+
+            // Check if video is stuck (same position for too long)
+            if (hasStartedPlaying && Math.abs(currentSeconds - lastPosition) < 0.1) {
+              stuckCounter++;
+              if (stuckCounter > 20) { // 10 seconds of being stuck
+                // Try to resume playback
+                if (playerState !== window.YT.PlayerState.PLAYING) {
+                  console.log('Video appears stuck, attempting to resume...');
+                  player.playVideo();
+                  stuckCounter = 0;
+                }
+              }
+            } else {
+              stuckCounter = 0;
+            }
+            lastPosition = currentSeconds;
+
+            // Handle case where we can't get duration but video is playing
+            if ((!duration || duration === 0) && hasStartedPlaying) {
+              // If we've been playing for a reasonable time without duration, 
+              // wait longer before giving up
+              if (Date.now() - startTime > 300000) { // 5 minutes max for unknown duration
                 clearInterval(intervalRef.current);
                 player.pauseVideo();
                 resolve({
                   runNumber,
-                  duration: 30,
+                  duration: currentSeconds,
                   completed: true,
                   actualPlayback: true,
-                  note: 'Completed with estimated duration'
+                  note: 'Completed - duration unknown, played for maximum time'
                 });
                 return;
               }
+              // Update progress based on time elapsed
+              const estimatedProgress = Math.min((Date.now() - startTime) / 180000 * 100, 95); // Assume 3 minutes max
+              setWatchProgress(estimatedProgress);
+              setCurrentTime(currentSeconds);
               return;
             }
 
-            const progress = (currentSeconds / duration) * 100;
+            // Normal progress tracking when we have duration
+            if (videoDuration > 0) {
+              const progress = (currentSeconds / videoDuration) * 100;
+              setCurrentTime(currentSeconds);
+              setWatchProgress(progress);
 
-            setCurrentTime(currentSeconds);
-            setWatchProgress(progress);
+              // Check if video is complete (with more lenient completion check)
+              if (currentSeconds >= videoDuration - 2 || progress >= 98 || playerState === window.YT.PlayerState.ENDED) {
+                clearInterval(intervalRef.current);
+                player.pauseVideo();
+                
+                // Clean up player
+                setTimeout(() => {
+                  if (player && player.destroy) {
+                    player.destroy();
+                  }
+                }, 1000);
 
-            // Check if video is complete
-            if (currentSeconds >= duration - 1 || progress >= 99) {
-              clearInterval(intervalRef.current);
-              player.pauseVideo();
-              
-              // Clean up player
-              setTimeout(() => {
-                if (player && player.destroy) {
-                  player.destroy();
-                }
-              }, 1000);
-
-              resolve({
-                runNumber,
-                duration,
-                completed: true,
-                actualPlayback: true,
-                finalTime: currentSeconds
-              });
+                resolve({
+                  runNumber,
+                  duration: videoDuration,
+                  completed: true,
+                  actualPlayback: true,
+                  finalTime: currentSeconds
+                });
+              }
             }
           } catch (error) {
             clearInterval(intervalRef.current);

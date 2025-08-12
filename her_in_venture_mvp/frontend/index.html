@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Her In Venture – Control Testing MVP</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Her In Venture – Control Testing MVP</h1>
+    <p>Upload prior workpapers and generate draft testing procedures using AI‑assisted similarity matching.</p>
+  </header>
+
+  <main>
+    <section id="upload-section">
+      <h2>1. Upload Historical Workpapers</h2>
+      <input type="file" id="file-input" multiple />
+      <button id="upload-btn">Upload</button>
+      <div id="upload-status" class="status"></div>
+    </section>
+
+    <section id="generate-section">
+      <h2>2. Generate Suggestion for New Control</h2>
+      <label for="control-name">Control Name:</label>
+      <input type="text" id="control-name" placeholder="e.g., Accounts Payable Approval" />
+      <label for="control-description">Control Description:</label>
+      <textarea id="control-description" rows="4" placeholder="Describe the control you need to test..."></textarea>
+      <button id="generate-btn">Generate Suggestion</button>
+      <div id="generate-status" class="status"></div>
+    </section>
+
+    <section id="suggestion-section">
+      <h2>3. Review & Edit Suggested Procedure</h2>
+      <textarea id="suggestion-text" rows="10" placeholder="Suggested procedure will appear here..." spellcheck="false"></textarea>
+    </section>
+
+    <section id="export-section">
+      <h2>4. Export Final Workpaper</h2>
+      <button id="export-btn">Export Workpaper (PDF)</button>
+      <div id="export-status" class="status"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
